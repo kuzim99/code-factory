@@ -1,0 +1,178 @@
+
+import Logger from '../util/Logger';
+
+export type apiClientConfig<T extends {[key: string]: any}> = {
+  method: httpMethod;
+  url: string;
+  data?: T;
+  token?: string;
+  headers?: {[key: string]: string};
+  interceptor?: ((data?: any) => void)[];
+};
+
+export enum httpMethod {
+  get = 'get',
+  post = 'post',
+  put = 'put',
+  patch = 'patch',
+  delete = 'delete',
+}
+
+export const useApiClient = () => {
+  const baseUrl = process.env.REACT_APP_API_URL ?? '';
+
+  // 요청
+  const request = async <T extends {[key: string]: any}, U>(
+    _config: apiClientConfig<T>,
+  ): Promise<ApiResponse<U>> => {
+    try {
+      const config = {
+        method: _config.method,
+        url: _config.url,
+        data: _config.data,
+        headers: _config.headers ?? {'Content-Type': 'application/json'},
+        token: _config.token,
+        interceptor: _config.interceptor ?? [],
+      };
+
+      setUrlParams(config);
+      setQueryParams(config);
+
+      config.token &&
+        (config.headers['Authorization'] = `Bearer ${config.token}`);
+
+      Logger.log('useApiClient request', config);
+
+      config.interceptor?.forEach(interceptor => interceptor());
+      const fetchResponse = await fetch(baseUrl + config.url, {
+        method: config.method,
+        headers: {
+          ...config.headers,
+        },
+        body:
+          config.method !== httpMethod.get && config.data
+            ? JSON.stringify(config.data)
+            : undefined,
+      });
+      const data = (await fetchResponse.json()) as U;
+      const apiResponse = new ApiResponse<U>(
+        fetchResponse.status,
+        fetchResponse.statusText,
+        data,
+      );
+      Logger.log('useApiClient response', apiResponse);
+      return apiResponse;
+    } catch (e: any) {
+      Logger.log('useApiClient error', e);
+      Logger.error(e);
+      return new ApiResponse<U>(
+        e.status ?? 500,
+        e.statusText ?? 'Internal Server Error!',
+        undefined,
+      );
+    }
+  };
+
+  // get 방식일 경우 query 파라미터 처리
+  const setQueryParams = <T extends {[key: string]: any}>(
+    config: apiClientConfig<T>,
+  ) => {
+    if (!config.data || config.method !== httpMethod.get) {
+      return;
+    }
+    const params = new URLSearchParams(config.data);
+    config.url = `${config.url}?${params}`;
+  };
+
+  // url 파라미터가 있는 경우 처리
+  const setUrlParams = <T extends {[key: string]: any}>(
+    config: apiClientConfig<T>,
+  ) => {
+    if (!config.data) {
+      return;
+    }
+
+    Object.keys(config.data).forEach(key => {
+      if (config.data && config.url.includes(`{${key}}`)) {
+        config.url = config.url.replace(`{${key}}`, config.data[key]);
+        delete config.data[key];
+      }
+    });
+  };
+
+  return {request};
+};
+
+
+export default class ApiResponse<T> {
+  readonly status: number;
+  readonly statusText: string;
+  readonly data?: T;
+
+  readonly isSuccess: boolean;
+  readonly isTokenExpired: boolean;
+
+  constructor(status: number, statusText: string, data?: T) {
+    this.status = status;
+    this.statusText = statusText;
+    this.data = data;
+
+    this.isSuccess = status === 200 || status === 201 || status === 204;
+    this.isTokenExpired = status === 401;
+  }
+
+  onFail(callback: (error: {status: number; statusText: string}) => void) {
+    if (this.isTokenExpired) {
+      return this;
+    }
+
+    if (!this.isSuccess) {
+      callback({
+        status: this.status,
+        statusText: this.statusText,
+      });
+    }
+
+    return this;
+  }
+
+  onSuccess(callback: (response: SuccessResponse<T>) => void) {
+    if (this.isTokenExpired) {
+      return this;
+    }
+
+    if (this.isSuccess && this.data) {
+      const response = new SuccessResponse<T>(
+          this.status,
+          this.statusText,
+          this.data,
+      );
+
+      callback(response);
+    }
+    return this;
+  }
+
+  onTokenExpired(callback: () => void) {
+    if (this.isTokenExpired) {
+      callback();
+    }
+    return this;
+  }
+}
+
+/**
+ * 응답이 성공인 경우 성공 응답
+ * APIResponse 의 onSuccess 에서 사용
+ */
+export class SuccessResponse<T> {
+  statusCode: number;
+  message: string;
+  data: T;
+
+  constructor(code: number, message: string, data: T) {
+    this.statusCode = code;
+    this.message = message;
+    this.data = data;
+  }
+}
