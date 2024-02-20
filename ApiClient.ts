@@ -171,7 +171,7 @@ export class ApiClient<T extends {[key: string]: any}, U> {
   };
 
   refreshAccessToken = async () => {
-    const response = await new ApiClient2<
+    const response = await new ApiClient<
       {refreshToken: string},
       {accessToken: string; refreshToken: string}
     >()
