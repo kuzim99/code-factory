@@ -176,7 +176,7 @@ export class ApiClient<T extends {[key: string]: any}, U> {
       {accessToken: string; refreshToken: string}
     >()
       .setMethod(httpMethod.post)
-      .setUrl('/backoffice/merchant/refresh-token/confirm')
+      .setUrl('')
       .setData({refreshToken: 'refresh'})
       .send();
 
